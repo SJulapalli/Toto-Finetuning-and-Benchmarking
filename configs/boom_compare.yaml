@@ -1,0 +1,34 @@
+# Compare Toto zero-shot vs seasonal-naive on REAL BOOM telemetry.
+# Sized for a CPU smoke test. On a GPU box: raise n_series, max_windows_per_series,
+# num_samples, and context_length for publishable numbers.
+#
+#   python scripts/compare.py --config configs/boom_compare.yaml
+#
+# freqs chosen so each series' seasonality fits inside the context window:
+#   5T -> 288, 10S -> 360  (both < context_length 512). Minute ("T") -> 1440
+#   would exceed it and fall back to lag-1, so we exclude it here.
+
+dataset: boom
+
+boom:
+  n_series: 6
+  max_len: 2048          # keep the most recent 2048 points per series
+  freqs: ["5T", "10S"]
+  seed: 0
+
+window:
+  context_length: 512
+  horizon: 96
+  stride: 256
+  max_windows_per_series: 1   # ~6 windows total for the smoke test
+
+models:
+  - name: seasonal_naive
+    residual_samples: 100
+    seed: 0
+  - name: toto
+    checkpoint: Datadog/Toto-Open-Base-1.0
+    num_samples: 64
+    samples_per_batch: 64
+    time_interval_seconds: 300   # nominal; Toto is largely interval-robust (see note)
+    device: cpu

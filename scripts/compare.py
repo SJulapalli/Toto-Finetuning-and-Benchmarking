@@ -19,6 +19,7 @@ import yaml
 from ttbench.eval.runner import (
     _build_dataset,
     _build_model,
+    _global_season_length,
     compare_table,
     run_benchmark,
 )
@@ -33,7 +34,7 @@ def main(argv: list[str] | None = None) -> None:
     with open(args.config) as fh:
         cfg = yaml.safe_load(fh)
 
-    season_length = cfg["synthetic"]["season_length"]
+    season_length = _global_season_length(cfg)
     _series, windows = _build_dataset(cfg)  # built ONCE, shared by all models
 
     model_specs = cfg.get("models") or [cfg["model"]]

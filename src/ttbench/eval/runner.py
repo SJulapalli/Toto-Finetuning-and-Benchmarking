@@ -75,12 +75,15 @@ def run_benchmark(
 
     for w in windows:
         forecast = model.predict(w.context, horizon)
+        # A window may carry its own seasonality (BOOM: derived per frequency);
+        # otherwise fall back to the dataset-level default.
+        m = w.season_length if w.season_length is not None else season_length
         scores = all_metrics(
             y_true=w.target,
             y_pred=forecast.median,
             samples=forecast.samples,
             context=w.context,
-            season_length=season_length,
+            season_length=m,
         )
         for m in METRIC_NAMES:
             per_window[m].append(scores[m])
@@ -101,33 +104,42 @@ def run_benchmark(
 
 
 def compare_table(results: list[BenchmarkResult]) -> str:
-    """Side-by-side mean metrics for several models evaluated on the SAME windows.
+    """Side-by-side metrics for several models evaluated on the SAME windows.
 
-    Also shows MASE/CRPS as a ratio vs the first model (the baseline), so the
-    improvement reads directly: ratio < 1.0 means "better than baseline".
+    Reports BOTH mean and median. The median is the robust headline: on
+    heavy-tailed telemetry, per-window MASE can blow up when a window's
+    in-context seasonal scale is ~0, and the *mean* of those ratios is dominated
+    by a few outliers. The median (and the gluonts-style aggregate-then-divide
+    MASE, a tracked refinement) are not. Improvement ratios use the median.
     """
     if not results:
         return "(no results)"
     base = results[0]
-    header = f"{'model':<28}" + "".join(f"{m:>12}" for m in METRIC_NAMES)
+
+    def block(title: str, key: str) -> list[str]:
+        header = f"{'model':<28}" + "".join(f"{m:>12}" for m in METRIC_NAMES)
+        out = [title, header, "-" * len(header)]
+        for r in results:
+            agg = getattr(r, key)
+            out.append(f"{r.model_name:<28}" + "".join(f"{agg[m]:>12.4f}" for m in METRIC_NAMES))
+        return out
+
     lines = [
-        f"windows={base.n_windows}  H={base.horizon}  ctx={base.context_length}  "
-        f"m={base.season_length}",
-        header,
-        "-" * len(header),
+        f"windows={base.n_windows}  H={base.horizon}  ctx={base.context_length}",
+        "",
+        *block("mean (note: mean MASE is unstable on heavy-tailed data)", "aggregate"),
+        "",
+        *block("median (robust headline)", "aggregate_median"),
+        "",
     ]
-    for r in results:
-        row = f"{r.model_name:<28}" + "".join(f"{r.aggregate[m]:>12.4f}" for m in METRIC_NAMES)
-        lines.append(row)
-    # relative improvement on the headline metrics
-    lines.append("-" * len(header))
     for metric in ("mase", "crps"):
         ratios = " ".join(
-            f"{r.model_name.split('_')[0]}={r.aggregate[metric] / base.aggregate[metric]:.3f}"
+            f"{r.model_name.split('_')[0]}="
+            f"{r.aggregate_median[metric] / base.aggregate_median[metric]:.3f}"
             for r in results[1:]
         )
         if ratios:
-            lines.append(f"{metric} vs {base.model_name} (lower=better): {ratios}")
+            lines.append(f"median {metric} vs {base.model_name} (lower=better): {ratios}")
     return "\n".join(lines)
 
 
@@ -154,22 +166,50 @@ def _load_config(path: str | None) -> dict[str, Any]:
     return merged
 
 
+def _global_season_length(cfg: dict[str, Any]) -> int:
+    """Dataset-level fallback seasonality (BOOM windows override this per-series)."""
+    return int(cfg.get("synthetic", {}).get("season_length", 1))
+
+
 def _build_dataset(cfg: dict[str, Any]):
-    if cfg["dataset"] != "synthetic":
-        raise NotImplementedError(
-            f"dataset '{cfg['dataset']}' not wired yet (BOOM loader is a later milestone)"
-        )
-    s = cfg["synthetic"]
-    series, _anomalies = generate(SyntheticConfig(**s))
     w = cfg["window"]
-    windows = make_windows(
-        series,
-        context_length=w["context_length"],
-        horizon=w["horizon"],
-        stride=w.get("stride"),
-        max_windows_per_series=w.get("max_windows_per_series"),
-    )
-    return series, windows
+    if cfg["dataset"] == "synthetic":
+        series, _anomalies = generate(SyntheticConfig(**cfg["synthetic"]))
+        windows = make_windows(
+            series,
+            context_length=w["context_length"],
+            horizon=w["horizon"],
+            stride=w.get("stride"),
+            max_windows_per_series=w.get("max_windows_per_series"),
+            season_length=cfg["synthetic"]["season_length"],
+        )
+        return series, windows
+
+    if cfg["dataset"] == "boom":
+        # Lazy import: needs the 'toto' extra (datasets + huggingface_hub + gluonts).
+        from ttbench.data.boom import freq_to_seasonality, load_boom
+        from ttbench.data.windows import make_windows_varlen
+
+        b = cfg.get("boom", {})
+        series = load_boom(
+            n_series=b.get("n_series", 50),
+            max_len=b.get("max_len", 4096),
+            freqs=b.get("freqs"),
+            seed=b.get("seed", 0),
+        )
+        targets = [s.target for s in series]
+        seasons = [freq_to_seasonality(s.freq) for s in series]
+        windows = make_windows_varlen(
+            targets,
+            context_length=w["context_length"],
+            horizon=w["horizon"],
+            stride=w.get("stride"),
+            max_windows_per_series=w.get("max_windows_per_series"),
+            season_lengths=seasons,
+        )
+        return series, windows
+
+    raise NotImplementedError(f"unknown dataset '{cfg['dataset']}'")
 
 
 def _build_model(cfg: dict[str, Any], season_length: int) -> ForecastModel:
@@ -201,7 +241,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     cfg = _load_config(args.config)
-    season_length = cfg["synthetic"]["season_length"]
+    season_length = _global_season_length(cfg)
 
     _series, windows = _build_dataset(cfg)
     model = _build_model(cfg, season_length)
