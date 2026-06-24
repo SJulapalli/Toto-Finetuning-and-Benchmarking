@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ttbench"
+version = "0.1.0"
+description = "A reproducible benchmark for telemetry time-series forecasting on Datadog's Toto, with Ray-based distributed fine-tuning."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Suhas Julapalli" }]
+
+# Core stays intentionally light: the harness, metrics, synthetic data, and
+# baselines run anywhere with just numpy + pyyaml. No torch, no GPU.
+dependencies = [
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Real Toto inference / fine-tuning. Toto 1.0 supports both zero-shot and
+# fine-tuning, which is why the stack standardizes on it.
+toto = [
+    "torch>=2.2",
+    "toto-ts",            # Toto 1.0: `from toto.model.toto import Toto`
+    "datasets==2.17.1",   # pinned by toto-ts; also used to pull the BOOM subset
+]
+# Distributed fine-tuning orchestration (Project 2).
+ray = [
+    "ray[train]>=2.10",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+ttbench-benchmark = "ttbench.eval.runner:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

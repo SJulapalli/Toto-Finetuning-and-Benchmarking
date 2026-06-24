@@ -1,0 +1,26 @@
+# Milestone-1 config: seasonal-naive baseline on synthetic telemetry.
+# Runs anywhere with the light core (numpy + pyyaml), no GPU / Toto needed.
+#
+#   ttbench-benchmark --config configs/synthetic_seasonal_naive.yaml
+#
+# Later milestones add configs for Toto zero-shot and the fine-tuned checkpoint
+# on a BOOM subset, reusing this same schema.
+
+dataset: synthetic
+
+synthetic:
+  n_series: 64
+  length: 1024
+  season_length: 24      # primary seasonality (e.g. daily on hourly data)
+  seed: 0                # fixed seed -> deterministic dataset (regression test relies on this)
+
+window:
+  context_length: 256    # history the model sees
+  horizon: 96            # steps to forecast / hold out
+  stride: 96             # non-overlapping targets (rolling-origin)
+  max_windows_per_series: 4
+
+model:
+  name: seasonal_naive
+  residual_samples: 100  # >0 gives the baseline a real predictive distribution -> non-degenerate CRPS
+  seed: 0

@@ -1,0 +1,31 @@
+# Compare Toto zero-shot vs the seasonal-naive baseline on identical windows.
+# Sized small so it runs on CPU in a reasonable time (smoke test). Scale up
+# n_series / max_windows_per_series / num_samples on a GPU box.
+#
+#   python scripts/compare.py --config configs/synthetic_compare.yaml
+
+dataset: synthetic
+
+synthetic:
+  n_series: 8
+  length: 512
+  season_length: 24
+  seed: 0
+
+window:
+  context_length: 256
+  horizon: 64
+  stride: 64
+  max_windows_per_series: 1   # -> 8 windows total
+
+# First model is treated as the baseline in the comparison ratios.
+models:
+  - name: seasonal_naive
+    residual_samples: 100
+    seed: 0
+  - name: toto
+    checkpoint: Datadog/Toto-Open-Base-1.0
+    num_samples: 64            # smaller than default 256 to keep CPU fast
+    samples_per_batch: 64
+    time_interval_seconds: 3600
+    device: cpu

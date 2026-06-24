@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Project artifacts
+results/*.json
+results/*.csv
+checkpoints/
+*.pt
+*.ckpt
+
+# Data caches (BOOM is large; never commit it)
+data_cache/
+*.arrow
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
